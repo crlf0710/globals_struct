@@ -1,0 +1,13 @@
+[package]
+name = "globals_struct"
+version = "0.1.0"
+authors = ["CrLF0710"]
+edition = "2018"
+license = "MIT OR Apache-2.0"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "1.0.42", features = ['full'] }
+quote = "1.0.7"
