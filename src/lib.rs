@@ -28,20 +28,26 @@ pub fn globals_struct(_attr: TokenStream, item: TokenStream) -> TokenStream {
         }
         Some((_, contents)) => contents,
     };
+    let mut field_vises = vec![];
     let mut field_names = vec![];
     let mut field_tys = vec![];
     let mut field_exprs = vec![];
     if let Err(e) = recursive_process_items(
         &mod_name,
         &mod_items,
-        (&mut field_names, &mut field_tys, &mut field_exprs),
+        (
+            &mut field_vises,
+            &mut field_names,
+            &mut field_tys,
+            &mut field_exprs,
+        ),
     ) {
         return e.to_compile_error().into();
     }
 
     let ts = quote! {
         #mod_vis struct #mod_name {
-            #(#field_names : #field_tys ,)*
+            #(#field_vises #field_names : #field_tys ,)*
         }
 
         impl ::core::default::Default for #mod_name {
@@ -58,7 +64,8 @@ pub fn globals_struct(_attr: TokenStream, item: TokenStream) -> TokenStream {
 fn recursive_process_items(
     mod_name: &syn::Ident,
     mod_items: &[syn::Item],
-    (field_names, field_tys, field_exprs): (
+    (field_vises, field_names, field_tys, field_exprs): (
+        &mut Vec<syn::Visibility>,
         &mut Vec<syn::Ident>,
         &mut Vec<Box<syn::Type>>,
         &mut Vec<Box<syn::Expr>>,
@@ -67,6 +74,7 @@ fn recursive_process_items(
     for item in mod_items {
         let item_span = item.span();
         if let syn::Item::Static(syn::ItemStatic {
+            vis: static_vis,
             attrs: static_attrs,
             ident: static_name,
             ty: static_ty,
@@ -77,6 +85,7 @@ fn recursive_process_items(
             let target = globals_struct_field_attr_target(&static_attrs, item_span)?;
             if let Some(target) = target {
                 if target == *mod_name {
+                    field_vises.push(static_vis.clone());
                     field_names.push(static_name.clone());
                     field_tys.push(static_ty.clone());
                     field_exprs.push(static_initializer.clone());
@@ -91,11 +100,14 @@ fn recursive_process_items(
                 .unwrap_or(false)
             {
                 let filepath = mac.parse_body::<syn::LitStr>()?;
-                let file_content = std::fs::read_to_string(filepath.value()).map_err(|e| {
-                    syn::Error::new(mac_span, e)
-                })?;
+                let file_content = std::fs::read_to_string(filepath.value())
+                    .map_err(|e| syn::Error::new(mac_span, e))?;
                 let file = syn::parse_file(&file_content)?;
-                recursive_process_items(mod_name, &file.items, (field_names, field_tys, field_exprs))?;
+                recursive_process_items(
+                    mod_name,
+                    &file.items,
+                    (field_vises, field_names, field_tys, field_exprs),
+                )?;
             }
         }
     }
