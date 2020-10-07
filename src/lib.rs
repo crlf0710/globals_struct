@@ -1,8 +1,8 @@
 extern crate proc_macro;
 use proc_macro::TokenStream;
+use quote::quote;
 use syn::parse_macro_input;
 use syn::spanned::Spanned;
-use quote::quote;
 
 #[proc_macro_attribute]
 pub fn globals_struct_field(_attr: TokenStream, _item: TokenStream) -> TokenStream {
@@ -31,33 +31,15 @@ pub fn globals_struct(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut field_names = vec![];
     let mut field_tys = vec![];
     let mut field_exprs = vec![];
-    for item in mod_items {
-        let item_span = item.span();
-        if let syn::Item::Static(syn::ItemStatic {
-            attrs: static_attrs,
-            ident: static_name,
-            ty: static_ty,
-            expr: static_initializer,
-            ..
-        }) = item
-        {
-            let target = match globals_struct_field_attr_target(&static_attrs, item_span) {
-                Ok(v) => v,
-                Err(e) => {
-                    return e.to_compile_error().into();
-                }
-            };
-            if let Some(target) = target {
-                if target == mod_name {
-                    field_names.push(static_name);
-                    field_tys.push(static_ty);
-                    field_exprs.push(static_initializer);
-                }
-            }
-        }
+    if let Err(e) = recursive_process_items(
+        &mod_name,
+        &mod_items,
+        (&mut field_names, &mut field_tys, &mut field_exprs),
+    ) {
+        return e.to_compile_error().into();
     }
 
-    let ts = quote!{
+    let ts = quote! {
         #mod_vis struct #mod_name {
             #(#field_names : #field_tys ,)*
         }
@@ -71,6 +53,53 @@ pub fn globals_struct(_attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
     ts.into()
+}
+
+fn recursive_process_items(
+    mod_name: &syn::Ident,
+    mod_items: &[syn::Item],
+    (field_names, field_tys, field_exprs): (
+        &mut Vec<syn::Ident>,
+        &mut Vec<Box<syn::Type>>,
+        &mut Vec<Box<syn::Expr>>,
+    ),
+) -> syn::Result<()> {
+    for item in mod_items {
+        let item_span = item.span();
+        if let syn::Item::Static(syn::ItemStatic {
+            attrs: static_attrs,
+            ident: static_name,
+            ty: static_ty,
+            expr: static_initializer,
+            ..
+        }) = item
+        {
+            let target = globals_struct_field_attr_target(&static_attrs, item_span)?;
+            if let Some(target) = target {
+                if target == *mod_name {
+                    field_names.push(static_name.clone());
+                    field_tys.push(static_ty.clone());
+                    field_exprs.push(static_initializer.clone());
+                }
+            }
+        } else if let syn::Item::Macro(syn::ItemMacro { mac, .. }) = item {
+            let mac_span = mac.span();
+            if mac
+                .path
+                .get_ident()
+                .map(|v| *v == "include")
+                .unwrap_or(false)
+            {
+                let filepath = mac.parse_body::<syn::LitStr>()?;
+                let file_content = std::fs::read_to_string(filepath.value()).map_err(|e| {
+                    syn::Error::new(mac_span, e)
+                })?;
+                let file = syn::parse_file(&file_content)?;
+                recursive_process_items(mod_name, &file.items, (field_names, field_tys, field_exprs))?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn globals_struct_field_attr_target(
