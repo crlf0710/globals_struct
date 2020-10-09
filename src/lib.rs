@@ -10,6 +10,11 @@ pub fn globals_struct_field(_attr: TokenStream, _item: TokenStream) -> TokenStre
 }
 
 #[proc_macro_attribute]
+pub fn globals_struct_use(_attr: TokenStream, _item: TokenStream) -> TokenStream {
+    TokenStream::new()
+}
+
+#[proc_macro_attribute]
 pub fn globals_struct(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let syn::ItemMod {
         vis: mod_vis,
@@ -32,6 +37,9 @@ pub fn globals_struct(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut field_names = vec![];
     let mut field_tys = vec![];
     let mut field_exprs = vec![];
+    let mut use_vises = vec![];
+    let mut use_leading_colons = vec![];
+    let mut use_usetrees = vec![];
     if let Err(e) = recursive_process_items(
         &mod_name,
         &mod_items,
@@ -41,6 +49,7 @@ pub fn globals_struct(_attr: TokenStream, item: TokenStream) -> TokenStream {
             &mut field_tys,
             &mut field_exprs,
         ),
+        (&mut use_vises, &mut use_leading_colons, &mut use_usetrees),
     ) {
         return e.to_compile_error().into();
     }
@@ -57,6 +66,8 @@ pub fn globals_struct(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
             }
         }
+
+        #(#use_vises use #use_leading_colons #use_usetrees;)*
     };
     ts.into()
 }
@@ -70,6 +81,11 @@ fn recursive_process_items(
         &mut Vec<Box<syn::Type>>,
         &mut Vec<Box<syn::Expr>>,
     ),
+    (use_vises, use_leading_colons, use_usetrees): (
+        &mut Vec<syn::Visibility>,
+        &mut Vec<Option<syn::Token![::]>>,
+        &mut Vec<syn::UseTree>,
+    ),
 ) -> syn::Result<()> {
     for item in mod_items {
         let item_span = item.span();
@@ -82,13 +98,32 @@ fn recursive_process_items(
             ..
         }) = item
         {
-            let target = globals_struct_field_attr_target(&static_attrs, item_span)?;
+            let target =
+                globals_struct_attr_target(&static_attrs, item_span, "globals_struct_field")?;
             if let Some(target) = target {
                 if target == *mod_name {
                     field_vises.push(static_vis.clone());
                     field_names.push(static_name.clone());
                     field_tys.push(static_ty.clone());
                     field_exprs.push(static_initializer.clone());
+                }
+            }
+        } else if let syn::Item::Use(syn::ItemUse {
+            vis: use_vis,
+            attrs: use_attrs,
+            leading_colon: use_leading_colon,
+            tree: use_usetree,
+            ..
+        }) = item
+        {
+            let target = globals_struct_attr_target(&use_attrs, item_span, "globals_struct_use")?;
+            if let Some(target) = target {
+                if target == *mod_name {
+                    if use_usetrees.iter().all(|existing| existing != use_usetree) {
+                        use_vises.push(use_vis.clone());
+                        use_leading_colons.push(use_leading_colon.clone());
+                        use_usetrees.push(use_usetree.clone());
+                    }
                 }
             }
         } else if let syn::Item::Macro(syn::ItemMacro { mac, .. }) = item {
@@ -107,6 +142,7 @@ fn recursive_process_items(
                     mod_name,
                     &file.items,
                     (field_vises, field_names, field_tys, field_exprs),
+                    (use_vises, use_leading_colons, use_usetrees),
                 )?;
             }
         }
@@ -114,18 +150,19 @@ fn recursive_process_items(
     Ok(())
 }
 
-fn globals_struct_field_attr_target(
+fn globals_struct_attr_target(
     attrs: &[syn::Attribute],
     span: syn::export::Span,
+    expected_attr_name: &'static str,
 ) -> syn::Result<Option<syn::Ident>> {
     let mut found_attr = None;
     for attr in attrs {
         if let Some(attr_ident) = get_path_last_ident(&attr.path) {
-            if *attr_ident == "globals_struct_field" {
+            if *attr_ident == expected_attr_name {
                 if found_attr.is_some() {
                     return Err(syn::Error::new(
                         span,
-                        "Attribute `globals_struct_field` should not be specified more than once on an item.",
+                        "Attribute `globals_struct_field` or `globals_struct_use` should not be specified more than once on an item.",
                     ));
                 }
                 found_attr = Some(attr);
@@ -143,7 +180,7 @@ fn globals_struct_field_attr_target(
         None => {
             return Err(syn::Error::new(
                 span,
-                "Attribute `globals_struct_field` should be specified in the form #[globals_struct_field(Globals)].",
+                "Attribute `globals_struct_field` or `globals_struct_use` should be specified in the form #[globals_struct_field(Globals)] or #[globals_struct_use(Globals)].",
             ));
         }
     };
