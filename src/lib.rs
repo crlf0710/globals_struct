@@ -111,7 +111,8 @@ pub fn globals_struct(_attr: TokenStream, item: TokenStream) -> TokenStream {
         ts.extend(Some(quote! {
             #mod_vis struct #view_name<'view> {
                 #(#view_field_vises #view_field_names : &'view mut #view_field_tys ,)*
-                __dummy__ : ::core::marker::PhantomData<&'view mut ()>
+                #[doc(hidden)]
+                pub __dummy__ : ::core::marker::PhantomData<&'view mut ()>
             }
             macro_rules! #ctor_name {
                 ($globals:expr) => {
