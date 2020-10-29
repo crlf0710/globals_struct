@@ -114,6 +114,7 @@ pub fn globals_struct(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 #[doc(hidden)]
                 pub __dummy__ : ::core::marker::PhantomData<&'view mut ()>
             }
+
             macro_rules! #ctor_name {
                 ($globals:expr) => {
                     #view_name {
@@ -122,6 +123,16 @@ pub fn globals_struct(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     }
                 }
             }
+
+            impl<'view> #view_name<'view> {
+                #mod_vis fn reborrow<'r>(&'r mut self) -> #view_name<'r> {
+                    #view_name {
+                        #(#view_field_names : self . #view_field_names,)*
+                        __dummy__ : ::core::marker::PhantomData
+                    }
+                }
+            }
+
         }));
     }
     ts.into()
