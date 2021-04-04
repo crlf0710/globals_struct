@@ -13,7 +13,7 @@ pub fn globals_struct_field(_attr: TokenStream, _item: TokenStream) -> TokenStre
 pub fn globals_struct_field_view(_attr: TokenStream, item: TokenStream) -> TokenStream {
     if syn::parse_macro_input::parse::<syn::ItemMod>(item).is_ok() {
         return syn::Error::new(
-            syn::export::Span::call_site(),
+            proc_macro2::Span::call_site(),
             "Attribute `globals_struct_field_view` must occur after `globals_struct` on modules!",
         )
         .to_compile_error()
@@ -39,7 +39,7 @@ pub fn globals_struct(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mod_items = match mod_content {
         None => {
             return syn::Error::new(
-                syn::export::Span::call_site(),
+                proc_macro2::Span::call_site(),
                 "Module content should be provided.",
             )
             .to_compile_error()
@@ -49,7 +49,7 @@ pub fn globals_struct(_attr: TokenStream, item: TokenStream) -> TokenStream {
     };
     let target_views = match globals_struct_attr_multiple_targets_and_values(
         &mod_attrs,
-        syn::export::Span::call_site(),
+        proc_macro2::Span::call_site(),
         "globals_struct_field_view",
     ) {
         Err(e) => {
@@ -232,7 +232,7 @@ fn recursive_process_items(
 
 fn globals_struct_attr_target(
     attrs: &[syn::Attribute],
-    span: syn::export::Span,
+    span: proc_macro2::Span,
     expected_attr_name: &'static str,
 ) -> syn::Result<Option<syn::Ident>> {
     let mut found_attr = None;
@@ -270,7 +270,7 @@ fn globals_struct_attr_target(
 
 fn globals_struct_attr_multiple_targets(
     attrs: &[syn::Attribute],
-    span: syn::export::Span,
+    span: proc_macro2::Span,
     expected_attr_name: &'static str,
 ) -> syn::Result<Vec<syn::Ident>> {
     let mut found_targets = vec![];
@@ -299,7 +299,7 @@ fn globals_struct_attr_multiple_targets(
 
 fn globals_struct_attr_multiple_targets_and_values(
     attrs: &[syn::Attribute],
-    span: syn::export::Span,
+    span: proc_macro2::Span,
     expected_attr_name: &'static str,
 ) -> syn::Result<Vec<(syn::Ident, syn::Ident)>> {
     let mut found_targets = vec![];
