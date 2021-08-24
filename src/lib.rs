@@ -47,6 +47,16 @@ pub fn globals_struct(_attr: TokenStream, item: TokenStream) -> TokenStream {
         }
         Some((_, contents)) => contents,
     };
+    let use_decl_macro = match globals_struct_attr_flag(
+        &mod_attrs,
+        proc_macro2::Span::call_site(),
+        "globals_struct_field_view_decl_macro_ctor",
+    ) {
+        Err(e) => {
+            return e.to_compile_error().into();
+        }
+        Ok(v) => v,
+    };
     let target_views = match globals_struct_attr_multiple_targets_and_values(
         &mod_attrs,
         proc_macro2::Span::call_site(),
@@ -115,15 +125,6 @@ pub fn globals_struct(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 pub __dummy__ : ::core::marker::PhantomData<&'view mut ()>
             }
 
-            macro_rules! #ctor_name {
-                ($globals:expr) => {
-                    #view_name {
-                        #(#view_field_names : &mut $globals . #view_field_names ,)*
-                        __dummy__ : ::core::marker::PhantomData
-                    }
-                }
-            }
-
             impl<'view> #view_name<'view> {
                 #mod_vis fn reborrow<'r>(&'r mut self) -> #view_name<'r> {
                     #view_name {
@@ -132,8 +133,29 @@ pub fn globals_struct(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     }
                 }
             }
-
         }));
+        if !use_decl_macro {
+            ts.extend(Some(quote! {
+                macro_rules! #ctor_name {
+                    ($globals:expr) => {
+                        #view_name {
+                            #(#view_field_names : &mut $globals . #view_field_names ,)*
+                            __dummy__ : ::core::marker::PhantomData
+                        }
+                    }
+                }
+
+            }));
+        } else {
+            ts.extend(Some(quote! {
+                #mod_vis macro #ctor_name ($globals:expr) {
+                    #view_name {
+                        #(#view_field_names : &mut $globals . #view_field_names ,)*
+                        __dummy__ : ::core::marker::PhantomData
+                    }
+                }
+            }));
+        }
     }
     ts.into()
 }
@@ -228,6 +250,29 @@ fn recursive_process_items(
         }
     }
     Ok(())
+}
+
+fn globals_struct_attr_flag(
+    attrs: &[syn::Attribute],
+    span: proc_macro2::Span,
+    expected_attr_name: &'static str,
+) -> syn::Result<bool> {
+    let mut found_attr = None;
+    for attr in attrs {
+        if let Some(attr_ident) = get_path_last_ident(&attr.path) {
+            if *attr_ident != expected_attr_name {
+                continue;
+            }
+            if found_attr.is_some() {
+                return Err(syn::Error::new(
+                    span,
+                    "Attribute `globals_struct_field_view_decl_macro_ctor` should not be specified more than once on an item.",
+                ));
+            }
+            found_attr = Some(attr);
+        }
+    }
+    Ok(found_attr.is_some())
 }
 
 fn globals_struct_attr_target(
