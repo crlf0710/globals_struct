@@ -2,13 +2,13 @@
 name = "globals_struct"
 version = "0.1.0"
 authors = ["CrLF0710"]
-edition = "2018"
+edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [lib]
 proc-macro = true
 
 [dependencies]
-syn = { version = "1", features = ['full', 'extra-traits'] }
+syn = { version = "2", features = ['full', 'extra-traits', 'proc-macro', 'parsing', 'printing', 'clone-impls'], default-features = false }
 quote = "1"
 proc-macro2 = "1"

@@ -4,6 +4,8 @@ use quote::quote;
 use syn::parse_macro_input;
 use syn::spanned::Spanned;
 
+// FIXME: Convert these two to `globals_struct` macro's helper attributes when they're ready.
+
 #[proc_macro_attribute]
 pub fn globals_struct_field(_attr: TokenStream, _item: TokenStream) -> TokenStream {
     TokenStream::new()
@@ -11,7 +13,7 @@ pub fn globals_struct_field(_attr: TokenStream, _item: TokenStream) -> TokenStre
 
 #[proc_macro_attribute]
 pub fn globals_struct_field_view(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    if syn::parse_macro_input::parse::<syn::ItemMod>(item).is_ok() {
+    if syn::parse::<syn::ItemMod>(item).is_ok() {
         return syn::Error::new(
             proc_macro2::Span::call_site(),
             "Attribute `globals_struct_field_view` must occur after `globals_struct` on modules!",
@@ -259,7 +261,7 @@ fn globals_struct_attr_flag(
 ) -> syn::Result<bool> {
     let mut found_attr = None;
     for attr in attrs {
-        if let Some(attr_ident) = get_path_last_ident(&attr.path) {
+        if let Some(attr_ident) = get_path_last_ident(attr.meta.path()) {
             if *attr_ident != expected_attr_name {
                 continue;
             }
@@ -282,7 +284,7 @@ fn globals_struct_attr_target(
 ) -> syn::Result<Option<syn::Ident>> {
     let mut found_attr = None;
     for attr in attrs {
-        if let Some(attr_ident) = get_path_last_ident(&attr.path) {
+        if let Some(attr_ident) = get_path_last_ident(attr.meta.path()) {
             if *attr_ident != expected_attr_name {
                 continue;
             }
@@ -300,8 +302,7 @@ fn globals_struct_attr_target(
     } else {
         return Ok(None);
     };
-    let meta = found_attr.parse_meta()?;
-    let target_path = match get_meta_sole_path(&meta) {
+    let target_path = match get_meta_sole_path(&found_attr.meta) {
         Some(path) => path,
         None => {
             return Err(syn::Error::new(
@@ -310,7 +311,7 @@ fn globals_struct_attr_target(
             ));
         }
     };
-    Ok(get_path_last_ident(target_path).cloned())
+    Ok(get_path_last_ident(&target_path).cloned())
 }
 
 fn globals_struct_attr_multiple_targets(
@@ -320,12 +321,11 @@ fn globals_struct_attr_multiple_targets(
 ) -> syn::Result<Vec<syn::Ident>> {
     let mut found_targets = vec![];
     for attr in attrs {
-        if let Some(attr_ident) = get_path_last_ident(&attr.path) {
+        if let Some(attr_ident) = get_path_last_ident(attr.meta.path()) {
             if *attr_ident != expected_attr_name {
                 continue;
             }
-            let meta = attr.parse_meta()?;
-            let target_path = match get_meta_sole_path(&meta) {
+            let target_path = match get_meta_sole_path(&attr.meta) {
                 Some(path) => path,
                 None => {
                     return Err(syn::Error::new(
@@ -334,7 +334,7 @@ fn globals_struct_attr_multiple_targets(
                     ));
                 }
             };
-            if let Some(target_path) = get_path_last_ident(target_path) {
+            if let Some(target_path) = get_path_last_ident(&target_path) {
                 found_targets.push(target_path.clone());
             }
         }
@@ -349,12 +349,11 @@ fn globals_struct_attr_multiple_targets_and_values(
 ) -> syn::Result<Vec<(syn::Ident, syn::Ident)>> {
     let mut found_targets = vec![];
     for attr in attrs {
-        if let Some(attr_ident) = get_path_last_ident(&attr.path) {
+        if let Some(attr_ident) = get_path_last_ident(attr.meta.path()) {
             if *attr_ident != expected_attr_name {
                 continue;
             }
-            let meta = attr.parse_meta()?;
-            let (target_path, target_value) = match get_meta_sole_path_and_value(&meta) {
+            let (target_path, target_value) = match get_meta_sole_path_and_value(&attr.meta) {
                 Some(path_and_value) => path_and_value,
                 None => {
                     return Err(syn::Error::new(
@@ -363,8 +362,8 @@ fn globals_struct_attr_multiple_targets_and_values(
                     ));
                 }
             };
-            if let Some(target_path) = get_path_last_ident(target_path) {
-                if let Some(target_value) = get_path_last_ident(target_value) {
+            if let Some(target_path) = get_path_last_ident(&target_path) {
+                if let Some(target_value) = get_path_last_ident(&target_value) {
                     found_targets.push((target_path.clone(), target_value.clone()));
                 }
             }
@@ -373,39 +372,45 @@ fn globals_struct_attr_multiple_targets_and_values(
     Ok(found_targets)
 }
 
-fn get_meta_sole_path(meta: &syn::Meta) -> Option<&syn::Path> {
-    let list = if let syn::Meta::List(list) = meta {
-        list
-    } else {
+fn get_meta_sole_path(meta: &syn::Meta) -> Option<syn::Path> {
+    let syn::Meta::List(list) = meta else {
         return None;
     };
-    if list.nested.len() != 1 {
+    let mut paths = vec![];
+    let Ok(_) = list.parse_nested_meta(|nested_meta| {
+        if nested_meta.input.is_empty() {
+            paths.push(Some(nested_meta.path));
+        } else {
+            paths.push(None);
+        }
+        Ok(())
+    }) else {
         return None;
-    }
-    if let syn::NestedMeta::Meta(syn::Meta::Path(inner_path)) = &list.nested[0] {
-        Some(inner_path)
-    } else {
-        None
+    };
+    match &paths[..] {
+        [Some(inner_path)] => Some(inner_path.clone()),
+        _ => None,
     }
 }
 
-fn get_meta_sole_path_and_value(meta: &syn::Meta) -> Option<(&syn::Path, &syn::Path)> {
-    let list = if let syn::Meta::List(list) = meta {
-        list
-    } else {
+fn get_meta_sole_path_and_value(meta: &syn::Meta) -> Option<(syn::Path, syn::Path)> {
+    let syn::Meta::List(list) = meta else {
         return None;
     };
-    if list.nested.len() != 2 {
-        return None;
-    }
-    if let syn::NestedMeta::Meta(syn::Meta::Path(inner_path)) = &list.nested[0] {
-        if let syn::NestedMeta::Meta(syn::Meta::Path(inner_path2)) = &list.nested[1] {
-            Some((inner_path, inner_path2))
+    let mut paths = vec![];
+    let Ok(_) = list.parse_nested_meta(|nested_meta| {
+        if nested_meta.input.is_empty() {
+            paths.push(Some(nested_meta.path));
         } else {
-            None
+            paths.push(None);
         }
-    } else {
-        None
+        Ok(())
+    }) else {
+        return None;
+    };
+    match &paths[..] {
+        [Some(inner_path), Some(inner_path2)] => Some((inner_path.clone(), inner_path2.clone())),
+        _ => None,
     }
 }
 
