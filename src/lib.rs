@@ -162,6 +162,49 @@ pub fn globals_struct(_attr: TokenStream, item: TokenStream) -> TokenStream {
     ts.into()
 }
 
+fn expand_env_vars_in_filepath(filepath: syn::LitStr) -> syn::Result<String> {
+    let chars = filepath.value();
+    let mut chars = chars.chars();
+    let mut result = String::new();
+    while let Some(ch) = chars.next() {
+        if ch != '$' {
+            result.push(ch);
+            continue;
+        }
+        match chars.next() {
+            Some('$') => {
+                result.push('$');
+            }
+            Some('{') => {
+                let mut var_name = String::new();
+                let mut finish_properly = false;
+                while let Some(ch) = chars.next() {
+                    if ch == '}' {
+                        finish_properly = true;
+                        break;
+                    } else {
+                        var_name.push(ch);
+                    }
+                }
+                if !finish_properly {
+                    return Err(syn::Error::new(filepath.span(), "Unmatched brace"));
+                }
+                let Ok(var_value) = std::env::var(&var_name) else {
+                    return Err(syn::Error::new(filepath.span(), format!("Failed to access environment variable `{var_name}`")));
+                };
+                result.push_str(&var_value);
+            }
+            _ => {
+                return Err(syn::Error::new(
+                    filepath.span(),
+                    "Dollar sign shall be followed by either brace or dollar sign",
+                ));
+            }
+        }
+    }
+    Ok(result)
+}
+
 fn recursive_process_items(
     mod_name: &syn::Ident,
     mod_items: &[syn::Item],
@@ -233,8 +276,9 @@ fn recursive_process_items(
                 .unwrap_or(false)
             {
                 let filepath = mac.parse_body::<syn::LitStr>()?;
-                let file_content = std::fs::read_to_string(filepath.value())
-                    .map_err(|e| syn::Error::new(mac_span, e))?;
+                let filepath = expand_env_vars_in_filepath(filepath)?;
+                let file_content =
+                    std::fs::read_to_string(filepath).map_err(|e| syn::Error::new(mac_span, e))?;
                 let file = syn::parse_file(&file_content)?;
                 recursive_process_items(
                     mod_name,
