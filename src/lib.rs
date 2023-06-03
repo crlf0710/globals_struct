@@ -74,6 +74,7 @@ pub fn globals_struct(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut field_tys = vec![];
     let mut field_exprs = vec![];
     let mut field_views = vec![];
+    let mut field_cfg_attrs = vec![];
     let mut use_vises = vec![];
     let mut use_leading_colons = vec![];
     let mut use_usetrees = vec![];
@@ -86,6 +87,7 @@ pub fn globals_struct(_attr: TokenStream, item: TokenStream) -> TokenStream {
             &mut field_tys,
             &mut field_exprs,
             &mut field_views,
+            &mut field_cfg_attrs,
         ),
         (&mut use_vises, &mut use_leading_colons, &mut use_usetrees),
     ) {
@@ -94,13 +96,13 @@ pub fn globals_struct(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let mut ts = quote! {
         #mod_vis struct #mod_name {
-            #(#field_vises #field_names : #field_tys ,)*
+            #(#(#field_cfg_attrs)* #field_vises #field_names : #field_tys ,)*
         }
 
         impl ::core::default::Default for #mod_name {
             fn default() -> Self {
                 #mod_name {
-                    #(#field_names : #field_exprs ,)*
+                    #(#(#field_cfg_attrs)* #field_names : #field_exprs ,)*
                 }
             }
         }
@@ -208,12 +210,13 @@ fn expand_env_vars_in_filepath(filepath: syn::LitStr) -> syn::Result<String> {
 fn recursive_process_items(
     mod_name: &syn::Ident,
     mod_items: &[syn::Item],
-    (field_vises, field_names, field_tys, field_exprs, field_views): (
+    (field_vises, field_names, field_tys, field_exprs, field_views, field_cfg_attrs): (
         &mut Vec<syn::Visibility>,
         &mut Vec<syn::Ident>,
         &mut Vec<Box<syn::Type>>,
         &mut Vec<Box<syn::Expr>>,
         &mut Vec<Vec<syn::Ident>>,
+        &mut Vec<Vec<syn::Attribute>>,
     ),
     (use_vises, use_leading_colons, use_usetrees): (
         &mut Vec<syn::Visibility>,
@@ -241,12 +244,14 @@ fn recursive_process_items(
                         item_span,
                         "globals_struct_field_view",
                     )?;
+                    let cfg_attrs = globals_struct_cfg_attr_list(&static_attrs)?;
 
                     field_vises.push(static_vis.clone());
                     field_names.push(static_name.clone());
                     field_tys.push(static_ty.clone());
                     field_exprs.push(static_initializer.clone());
                     field_views.push(target_views);
+                    field_cfg_attrs.push(cfg_attrs);
                 }
             }
         } else if let syn::Item::Use(syn::ItemUse {
@@ -289,6 +294,7 @@ fn recursive_process_items(
                         field_tys,
                         field_exprs,
                         field_views,
+                        field_cfg_attrs,
                     ),
                     (use_vises, use_leading_colons, use_usetrees),
                 )?;
@@ -414,6 +420,20 @@ fn globals_struct_attr_multiple_targets_and_values(
         }
     }
     Ok(found_targets)
+}
+
+fn globals_struct_cfg_attr_list(attrs: &[syn::Attribute]) -> syn::Result<Vec<syn::Attribute>> {
+    let expected_attr_name = "cfg";
+    let mut found_attrs = vec![];
+    for attr in attrs {
+        if let Some(attr_ident) = get_path_last_ident(attr.meta.path()) {
+            if *attr_ident != expected_attr_name {
+                continue;
+            }
+            found_attrs.push(attr.clone());
+        }
+    }
+    Ok(found_attrs)
 }
 
 fn get_meta_sole_path(meta: &syn::Meta) -> Option<syn::Path> {
